@@ -112,7 +112,8 @@ def find_layers(module, layers=[nn.Conv2d, nn.Linear], name=''):
     return res
 
 
-def load_llama_model_4bit_low_ram(config_path, model_path, groupsize=-1, half=False, device_map="auto", seqlen=2048):
+def load_llama_model_4bit_low_ram(config_path, model_path, groupsize=-1, half=False, device_map="auto", seqlen=2048, lora_path="./alpaca_lora"):
+    print("LOW RAM LLAMA LOADING")
     import accelerate
     from transformers import LlamaConfig, LlamaForCausalLM, LlamaTokenizer
 
@@ -134,6 +135,14 @@ def load_llama_model_4bit_low_ram(config_path, model_path, groupsize=-1, half=Fa
         device_map=device_map,
         no_split_module_classes=["LlamaDecoderLayer"]
     )
+
+    if lora_path is not None:
+        print("LOADING LORA")
+        from peft import PeftModel
+        from peft.tuners.lora import Linear4bitLt
+        model = PeftModel.from_pretrained(model, lora_path, device_map={'': 0}, torch_dtype=torch.float32)
+        print('{} Lora Applied.'.format(lora_path))
+
 
     model.seqlen = seqlen
 

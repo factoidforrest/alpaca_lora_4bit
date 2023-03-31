@@ -45,7 +45,8 @@ if ft_config.gradient_checkpointing:
 model, tokenizer = load_llama_model_4bit_low_ram(ft_config.llama_q4_config_dir,
                                                   ft_config.llama_q4_model,
                                                   device_map=ft_config.device_map,
-                                                  groupsize=ft_config.groupsize)
+                                                  groupsize=ft_config.groupsize,
+                                                  lora_path=None )
 
 # Config Lora
 lora_config = LoraConfig(
@@ -103,11 +104,11 @@ if not ft_config.skip:
         model.model_parallel = True
 
     training_arguments = transformers.TrainingArguments(
-        per_device_train_batch_size=ft_config.mbatch_size,
-        gradient_accumulation_steps=ft_config.gradient_accumulation_steps,
-        warmup_steps=ft_config.warmup_steps,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=8,
+        warmup_ratio=0.03,
         num_train_epochs=ft_config.epochs,
-        learning_rate=ft_config.lr,
+        learning_rate=3e-4,
         fp16=True,
         logging_steps=ft_config.logging_steps,
         evaluation_strategy="no",
@@ -118,7 +119,11 @@ if not ft_config.skip:
         save_total_limit=ft_config.save_total_limit,
         load_best_model_at_end=False,
         ddp_find_unused_parameters=False if ft_config.ddp else None,
+        weight_decay=0.01,
+        tf32=False # aws GPUs too old
     )
+
+    print(training_arguments)
 
     trainer = transformers.Trainer(
         model=model,

