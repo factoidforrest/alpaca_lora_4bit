@@ -16,6 +16,19 @@
         }
     ]
 """
+# Early load config to replace attn if needed
+from arg_parser import get_config
+ft_config = get_config()
+
+if ft_config.flash_attention:
+    from monkeypatch.llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
+    replace_llama_attn_with_flash_attn()
+
+import autograd_4bit
+if ft_config.backend.lower() == 'triton':
+    autograd_4bit.switch_backend_to('triton')
+else:
+    autograd_4bit.switch_backend_to('cuda')
 
 import sys
 
@@ -29,10 +42,9 @@ from autograd_4bit import load_llama_model_4bit_low_ram
 from peft import LoraConfig, get_peft_model, get_peft_model_state_dict, PeftModel
 
 # ! Config
-from arg_parser import get_config
 import train_data
 
-ft_config = get_config()
+
 
 # * Show loaded parameters
 if ft_config.local_rank == 0:
@@ -45,8 +57,7 @@ if ft_config.gradient_checkpointing:
 model, tokenizer = load_llama_model_4bit_low_ram(ft_config.llama_q4_config_dir,
                                                   ft_config.llama_q4_model,
                                                   device_map=ft_config.device_map,
-                                                  groupsize=ft_config.groupsize,
-                                                  lora_path=None )
+                                                  groupsize=ft_config.groupsize)
 
 # Config Lora
 lora_config = LoraConfig(
@@ -60,7 +71,16 @@ lora_config = LoraConfig(
 if ft_config.lora_apply_dir is None:
     model = get_peft_model(model, lora_config)
 else:
-    model = PeftModel.from_pretrained(model, ft_config.lora_apply_dir, device_map={'': 0}, torch_dtype=torch.float32)  # ! Direct copy from inference.py
+    device_map = ft_config.device_map
+    if ft_config.ddp:
+        device_map = {'': 0}
+    else:
+        if torch.cuda.device_count() > 1:
+            device_map = "auto"
+        else:
+            device_map = {'': 0}
+    print('Device map for lora:', device_map)
+    model = PeftModel.from_pretrained(model, ft_config.lora_apply_dir, device_map=device_map, torch_dtype=torch.float32)
     print(ft_config.lora_apply_dir, 'loaded')
 
 
@@ -104,11 +124,12 @@ if not ft_config.skip:
         model.model_parallel = True
 
     training_arguments = transformers.TrainingArguments(
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=8,
-        warmup_ratio=0.03,
+        per_device_train_batch_size=ft_config.mbatch_size,
+        gradient_accumulation_steps=ft_config.gradient_accumulation_steps,
+        warmup_steps=ft_config.warmup_steps,
+        optim="adamw_torch",
         num_train_epochs=ft_config.epochs,
-        learning_rate=3e-4,
+        learning_rate=ft_config.lr,
         fp16=True,
         logging_steps=ft_config.logging_steps,
         evaluation_strategy="no",
@@ -119,11 +140,7 @@ if not ft_config.skip:
         save_total_limit=ft_config.save_total_limit,
         load_best_model_at_end=False,
         ddp_find_unused_parameters=False if ft_config.ddp else None,
-        weight_decay=0.01,
-        tf32=False # aws GPUs too old
     )
-
-    print(training_arguments)
 
     trainer = transformers.Trainer(
         model=model,
