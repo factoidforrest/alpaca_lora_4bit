@@ -21,7 +21,7 @@ from amp_wrapper import AMPWrapper
 wrapper = AMPWrapper(model)
 wrapper.apply_generate()
 
-prompt = '''Basic explanation of log4shell:'''
+prompt = '''Pineapple pizza is'''
 batch = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
 batch = {k: v.cuda() for k, v in batch.items()}
 
